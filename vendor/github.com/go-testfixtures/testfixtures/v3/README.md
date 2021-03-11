@@ -1,6 +1,6 @@
 # testfixtures
 
-[![GoDoc](https://godoc.org/github.com/go-testfixtures/testfixtures?status.svg)][doc]
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/go-testfixtures/testfixtures/v3?tab=doc)](https://pkg.go.dev/github.com/go-testfixtures/testfixtures/v3?tab=doc)
 
 > ***Warning***: this package will wipe the database data before loading the
 fixtures! It is supposed to be used on a test database. Please, double check
@@ -90,6 +90,13 @@ databases.
     post: "..."
 ```
 
+Binary columns can be represented as hexadecimal strings (should start with `0x`):
+
+```yaml
+- id: 1
+  binary_column: 0x1234567890abcdef
+```
+
 If you need to write raw SQL, probably to call a function, prefix the value
 of the column with `RAW=`:
 
@@ -129,7 +136,7 @@ func TestMain(m *testing.M) {
                 ...
         }
 
-        fixtures, err := testfixtures.New(
+        fixtures, err = testfixtures.New(
                 testfixtures.Database(db), // You database connection
                 testfixtures.Dialect("postgres"), // Available: "postgresql", "timescaledb", "mysql", "mariadb", "sqlite" and "sqlserver"
                 testfixtures.Directory("testdata/fixtures"), // the directory containing the YAML files
@@ -436,8 +443,15 @@ each test run in a transaction.
 ## CLI
 
 We also have a CLI to load fixtures in a given database.
+
 Grab it from the [releases page](https://github.com/go-testfixtures/testfixtures/releases)
-and use it like:
+or install with Homebrew:
+
+```bash
+brew install go-testfixtures/tap/testfixtures
+```
+
+Usage is like this:
 
 ```bash
 testfixtures -d postgres -c "postgres://user:password@localhost/database" -D testdata/fixtures
@@ -445,7 +459,7 @@ testfixtures -d postgres -c "postgres://user:password@localhost/database" -D tes
 
 The connection string changes for each database driver.
 
-Use `--help` for all flags.
+Use `testfixtures --help` for all flags.
 
 ## Contributing
 

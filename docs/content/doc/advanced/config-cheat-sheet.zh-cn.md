@@ -17,6 +17,8 @@ menu:
 
 这是针对Gitea配置文件的说明，你可以了解Gitea的强大配置。需要说明的是，你的所有改变请修改 `custom/conf/app.ini` 文件而不是源文件。所有默认值可以通过 [app.example.ini](https://github.com/go-gitea/gitea/blob/master/custom/conf/app.example.ini) 查看到。如果你发现 `%(X)s` 这样的内容，请查看 [ini](https://github.com/go-ini/ini/#recursive-values) 这里的说明。标注了 :exclamation: 的配置项表明除非你真的理解这个配置项的意义，否则最好使用默认值。
 
+{{< toc >}}
+
 ## Overall (`DEFAULT`)
 
 - `APP_NAME`: 应用名称，改成你希望的名字。
@@ -68,11 +70,12 @@ menu:
 - `KEY_FILE`: 启用HTTPS的密钥文件。
 - `STATIC_ROOT_PATH`: 存放模板和静态文件的根目录，默认是 Gitea 的根目录。
 - `STATIC_CACHE_TIME`: **6h**: 静态资源文件，包括 `custom/`, `public/` 和所有上传的头像的浏览器缓存时间。
-- `ENABLE_GZIP`: 启用应用级别的 GZIP 压缩。
+- `ENABLE_GZIP`: 启用实时生成的数据启用 GZIP 压缩，不包括静态资源。
 - `LANDING_PAGE`: 未登录用户的默认页面，可选 `home` 或 `explore`。
 
 - `LFS_START_SERVER`: 是否启用 git-lfs 支持. 可以为 `true` 或 `false`， 默认是 `false`。
 - `LFS_JWT_SECRET`: LFS 认证密钥，改成自己的。
+- `LFS_CONTENT_PATH`: **已废弃**, 存放 lfs 命令上传的文件的地方，默认是 `data/lfs`。
 
 ## Database (`database`)
 
@@ -122,6 +125,7 @@ menu:
 - `ACTIVE_CODE_LIVE_MINUTES`: 登录验证码失效时间，单位分钟。
 - `RESET_PASSWD_CODE_LIVE_MINUTES`: 重置密码失效时间，单位分钟。
 - `REGISTER_EMAIL_CONFIRM`: 启用注册邮件激活，前提是 `Mailer` 已经启用。
+- `REGISTER_MANUAL_CONFIRM`: **false**: 新注册用户必须由管理员手动激活,启用此选项需取消`REGISTER_EMAIL_CONFIRM`.
 - `DISABLE_REGISTRATION`: 禁用注册，启用后只能用管理员添加用户。
 - `SHOW_REGISTRATION_BUTTON`: 是否显示注册按钮。
 - `REQUIRE_SIGNIN_VIEW`: 是否所有页面都必须登录后才可访问。
@@ -181,6 +185,20 @@ menu:
 - `GRAVATAR_SOURCE`: 头像来源，可以是 `gravatar`, `duoshuo` 或者类似 `http://cn.gravatar.com/avatar/` 的来源
 - `DISABLE_GRAVATAR`: 开启则只使用内部头像。
 - `ENABLE_FEDERATED_AVATAR`: 启用头像联盟支持 (参见 http://www.libravatar.org)
+
+- `AVATAR_STORAGE_TYPE`: **local**: 头像存储类型，可以为 `local` 或 `minio`，分别支持本地文件系统和 minio 兼容的API。
+- `AVATAR_UPLOAD_PATH`: **data/avatars**: 存储头像的文件系统路径。
+- `AVATAR_MAX_WIDTH`: **4096**: 头像最大宽度，单位像素。
+- `AVATAR_MAX_HEIGHT`: **3072**: 头像最大高度，单位像素。
+- `AVATAR_MAX_FILE_SIZE`: **1048576** (1Mb): 头像最大大小。
+
+- `REPOSITORY_AVATAR_STORAGE_TYPE`: **local**: 仓库头像存储类型，可以为 `local` 或 `minio`，分别支持本地文件系统和 minio 兼容的API。
+- `REPOSITORY_AVATAR_UPLOAD_PATH`: **data/repo-avatars**: 存储仓库头像的路径。
+- `REPOSITORY_AVATAR_FALLBACK`: **none**: 当头像丢失时的处理方式
+  - none = 不显示头像
+  - random = 显示随机生成的头像
+  - image = 显示默认头像，通过 `REPOSITORY_AVATAR_FALLBACK_IMAGE` 设置
+- `REPOSITORY_AVATAR_FALLBACK_IMAGE`: **/img/repo_default.png**: 默认仓库头像
 
 ## Attachment (`attachment`)
 
@@ -299,6 +317,9 @@ IS_INPUT_FILE = false
 
 - `MAX_ATTEMPTS`: **3**: 在迁移过程中的 http/https 请求重试次数。
 - `RETRY_BACKOFF`: **3**: 等待下一次重试的时间，单位秒。
+- `ALLOWED_DOMAINS`: **\<empty\>**: 迁移仓库的域名白名单，默认为空，表示允许从任意域名迁移仓库，多个域名用逗号分隔。
+- `BLOCKED_DOMAINS`: **\<empty\>**: 迁移仓库的域名黑名单，默认为空，多个域名用逗号分隔。如果 `ALLOWED_DOMAINS` 不为空，此选项将会被忽略。
+- `ALLOW_LOCALNETWORKS`: **false**: Allow private addresses defined by RFC 1918
 
 ## LFS (`lfs`)
 
@@ -306,7 +327,7 @@ LFS 的存储配置。 如果 `STORAGE_TYPE` 为空，则此配置将从 `[stora
 
 - `STORAGE_TYPE`: **local**: LFS 的存储类型，`local` 将存储到磁盘，`minio` 将存储到 s3 兼容的对象服务。
 - `SERVE_DIRECT`: **false**: 允许直接重定向到存储系统。当前，仅 Minio/S3 是支持的。
-- `CONTENT_PATH`: 存放 lfs 命令上传的文件的地方，默认是 `data/lfs`。
+- `PATH`: 存放 lfs 命令上传的文件的地方，默认是 `data/lfs`。
 - `MINIO_ENDPOINT`: **localhost:9000**: Minio 地址，仅当 `LFS_STORAGE_TYPE` 为 `minio` 时有效。
 - `MINIO_ACCESS_KEY_ID`: Minio accessKeyID，仅当 `LFS_STORAGE_TYPE` 为 `minio` 时有效。
 - `MINIO_SECRET_ACCESS_KEY`: Minio secretAccessKey，仅当 `LFS_STORAGE_TYPE` 为 `minio` 时有效。

@@ -14,13 +14,15 @@ import (
 	"strings"
 
 	"code.gitea.io/gitea/models"
-	"code.gitea.io/gitea/modules/auth"
 	"code.gitea.io/gitea/modules/base"
 	"code.gitea.io/gitea/modules/context"
+	auth "code.gitea.io/gitea/modules/forms"
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/setting"
+	"code.gitea.io/gitea/modules/util"
+	"code.gitea.io/gitea/modules/web"
+	"code.gitea.io/gitea/modules/web/middleware"
 
-	"github.com/unknwon/com"
 	"github.com/unknwon/i18n"
 )
 
@@ -38,46 +40,41 @@ func Profile(ctx *context.Context) {
 	ctx.HTML(200, tplSettingsProfile)
 }
 
-func handleUsernameChange(ctx *context.Context, newName string) {
+// HandleUsernameChange handle username changes from user settings and admin interface
+func HandleUsernameChange(ctx *context.Context, user *models.User, newName string) error {
 	// Non-local users are not allowed to change their username.
-	if len(newName) == 0 || !ctx.User.IsLocal() {
-		return
+	if !user.IsLocal() {
+		ctx.Flash.Error(ctx.Tr("form.username_change_not_local_user"))
+		return fmt.Errorf(ctx.Tr("form.username_change_not_local_user"))
 	}
 
 	// Check if user name has been changed
-	if ctx.User.LowerName != strings.ToLower(newName) {
-		if err := models.ChangeUserName(ctx.User, newName); err != nil {
+	if user.LowerName != strings.ToLower(newName) {
+		if err := models.ChangeUserName(user, newName); err != nil {
 			switch {
 			case models.IsErrUserAlreadyExist(err):
 				ctx.Flash.Error(ctx.Tr("form.username_been_taken"))
-				ctx.Redirect(setting.AppSubURL + "/user/settings")
 			case models.IsErrEmailAlreadyUsed(err):
 				ctx.Flash.Error(ctx.Tr("form.email_been_used"))
-				ctx.Redirect(setting.AppSubURL + "/user/settings")
 			case models.IsErrNameReserved(err):
 				ctx.Flash.Error(ctx.Tr("user.form.name_reserved", newName))
-				ctx.Redirect(setting.AppSubURL + "/user/settings")
 			case models.IsErrNamePatternNotAllowed(err):
 				ctx.Flash.Error(ctx.Tr("user.form.name_pattern_not_allowed", newName))
-				ctx.Redirect(setting.AppSubURL + "/user/settings")
 			case models.IsErrNameCharsNotAllowed(err):
 				ctx.Flash.Error(ctx.Tr("user.form.name_chars_not_allowed", newName))
-				ctx.Redirect(setting.AppSubURL + "/user/settings")
 			default:
 				ctx.ServerError("ChangeUserName", err)
 			}
-			return
+			return err
 		}
-		log.Trace("User name changed: %s -> %s", ctx.User.Name, newName)
+		log.Trace("User name changed: %s -> %s", user.Name, newName)
 	}
-
-	// In case it's just a case change
-	ctx.User.Name = newName
-	ctx.User.LowerName = strings.ToLower(newName)
+	return nil
 }
 
 // ProfilePost response for change user's profile
-func ProfilePost(ctx *context.Context, form auth.UpdateProfileForm) {
+func ProfilePost(ctx *context.Context) {
+	form := web.GetForm(ctx).(*auth.UpdateProfileForm)
 	ctx.Data["Title"] = ctx.Tr("settings")
 	ctx.Data["PageIsSettingsProfile"] = true
 
@@ -86,17 +83,27 @@ func ProfilePost(ctx *context.Context, form auth.UpdateProfileForm) {
 		return
 	}
 
-	handleUsernameChange(ctx, form.Name)
-	if ctx.Written() {
-		return
+	if len(form.Name) != 0 && ctx.User.Name != form.Name {
+		if err := HandleUsernameChange(ctx, ctx.User, form.Name); err != nil {
+			ctx.Redirect(setting.AppSubURL + "/user/settings")
+			return
+		}
+		ctx.User.Name = form.Name
+		ctx.User.LowerName = strings.ToLower(form.Name)
 	}
 
 	ctx.User.FullName = form.FullName
-	ctx.User.Email = form.Email
 	ctx.User.KeepEmailPrivate = form.KeepEmailPrivate
 	ctx.User.Website = form.Website
 	ctx.User.Location = form.Location
-	ctx.User.Language = form.Language
+	if len(form.Language) != 0 {
+		if !util.IsStringInSlice(form.Language, setting.Langs) {
+			ctx.Flash.Error(ctx.Tr("settings.update_language_not_found", form.Language))
+			ctx.Redirect(setting.AppSubURL + "/user/settings")
+			return
+		}
+		ctx.User.Language = form.Language
+	}
 	ctx.User.Description = form.Description
 	ctx.User.KeepActivityPrivate = form.KeepActivityPrivate
 	if err := models.UpdateUserSetting(ctx.User); err != nil {
@@ -110,7 +117,7 @@ func ProfilePost(ctx *context.Context, form auth.UpdateProfileForm) {
 	}
 
 	// Update the language to the one we just set
-	ctx.SetCookie("lang", ctx.User.Language, nil, setting.AppSubURL, setting.SessionConfig.Domain, setting.SessionConfig.Secure, true)
+	middleware.SetLocaleCookie(ctx.Resp, ctx.User.Language, 0)
 
 	log.Trace("User settings updated: %s", ctx.User.Name)
 	ctx.Flash.Success(i18n.Tr(ctx.User.Language, "settings.update_profile_success"))
@@ -119,10 +126,14 @@ func ProfilePost(ctx *context.Context, form auth.UpdateProfileForm) {
 
 // UpdateAvatarSetting update user's avatar
 // FIXME: limit size.
-func UpdateAvatarSetting(ctx *context.Context, form auth.AvatarForm, ctxUser *models.User) error {
+func UpdateAvatarSetting(ctx *context.Context, form *auth.AvatarForm, ctxUser *models.User) error {
 	ctxUser.UseCustomAvatar = form.Source == auth.AvatarLocal
 	if len(form.Gravatar) > 0 {
-		ctxUser.Avatar = base.EncodeMD5(form.Gravatar)
+		if form.Avatar != nil {
+			ctxUser.Avatar = base.EncodeMD5(form.Gravatar)
+		} else {
+			ctxUser.Avatar = ""
+		}
 		ctxUser.AvatarEmail = form.Gravatar
 	}
 
@@ -133,7 +144,7 @@ func UpdateAvatarSetting(ctx *context.Context, form auth.AvatarForm, ctxUser *mo
 		}
 		defer fr.Close()
 
-		if form.Avatar.Size > setting.AvatarMaxFileSize {
+		if form.Avatar.Size > setting.Avatar.MaxFileSize {
 			return errors.New(ctx.Tr("settings.uploaded_avatar_is_too_big"))
 		}
 
@@ -147,7 +158,7 @@ func UpdateAvatarSetting(ctx *context.Context, form auth.AvatarForm, ctxUser *mo
 		if err = ctxUser.UploadAvatar(data); err != nil {
 			return fmt.Errorf("UploadAvatar: %v", err)
 		}
-	} else if ctxUser.UseCustomAvatar && !com.IsFile(ctxUser.CustomAvatarPath()) {
+	} else if ctxUser.UseCustomAvatar && ctxUser.Avatar == "" {
 		// No avatar is uploaded but setting has been changed to enable,
 		// generate a random one when needed.
 		if err := ctxUser.GenerateRandomAvatar(); err != nil {
@@ -163,7 +174,8 @@ func UpdateAvatarSetting(ctx *context.Context, form auth.AvatarForm, ctxUser *mo
 }
 
 // AvatarPost response for change user's avatar request
-func AvatarPost(ctx *context.Context, form auth.AvatarForm) {
+func AvatarPost(ctx *context.Context) {
+	form := web.GetForm(ctx).(*auth.AvatarForm)
 	if err := UpdateAvatarSetting(ctx, form, ctx.User); err != nil {
 		ctx.Flash.Error(err.Error())
 	} else {
@@ -225,6 +237,9 @@ func Repos(ctx *context.Context) {
 		root := filepath.Join(models.UserPath(ctxUser.Name))
 		if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
 				return err
 			}
 			if !info.IsDir() || path == root {

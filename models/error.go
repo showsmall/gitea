@@ -146,6 +146,21 @@ func (err ErrUserNotExist) Error() string {
 	return fmt.Sprintf("user does not exist [uid: %d, name: %s, keyid: %d]", err.UID, err.Name, err.KeyID)
 }
 
+// ErrUserRedirectNotExist represents a "UserRedirectNotExist" kind of error.
+type ErrUserRedirectNotExist struct {
+	Name string
+}
+
+// IsErrUserRedirectNotExist check if an error is an ErrUserRedirectNotExist.
+func IsErrUserRedirectNotExist(err error) bool {
+	_, ok := err.(ErrUserRedirectNotExist)
+	return ok
+}
+
+func (err ErrUserRedirectNotExist) Error() string {
+	return fmt.Sprintf("user redirect does not exist [name: %s]", err.Name)
+}
+
 // ErrUserProhibitLogin represents a "ErrUserProhibitLogin" kind of error.
 type ErrUserProhibitLogin struct {
 	UID  int64
@@ -191,6 +206,21 @@ func IsErrEmailAlreadyUsed(err error) bool {
 
 func (err ErrEmailAlreadyUsed) Error() string {
 	return fmt.Sprintf("e-mail already in use [email: %s]", err.Email)
+}
+
+// ErrEmailInvalid represents an error where the email address does not comply with RFC 5322
+type ErrEmailInvalid struct {
+	Email string
+}
+
+// IsErrEmailInvalid checks if an error is an ErrEmailInvalid
+func IsErrEmailInvalid(err error) bool {
+	_, ok := err.(ErrEmailInvalid)
+	return ok
+}
+
+func (err ErrEmailInvalid) Error() string {
+	return fmt.Sprintf("e-mail invalid [email: %s]", err.Email)
 }
 
 // ErrOpenIDAlreadyUsed represents a "OpenIDAlreadyUsed" kind of error.
@@ -727,6 +757,40 @@ func (err ErrRepoNotExist) Error() string {
 		err.ID, err.UID, err.OwnerName, err.Name)
 }
 
+// ErrNoPendingRepoTransfer is an error type for repositories without a pending
+// transfer request
+type ErrNoPendingRepoTransfer struct {
+	RepoID int64
+}
+
+func (e ErrNoPendingRepoTransfer) Error() string {
+	return fmt.Sprintf("repository doesn't have a pending transfer [repo_id: %d]", e.RepoID)
+}
+
+// IsErrNoPendingTransfer is an error type when a repository has no pending
+// transfers
+func IsErrNoPendingTransfer(err error) bool {
+	_, ok := err.(ErrNoPendingRepoTransfer)
+	return ok
+}
+
+// ErrRepoTransferInProgress represents the state of a repository that has an
+// ongoing transfer
+type ErrRepoTransferInProgress struct {
+	Uname string
+	Name  string
+}
+
+// IsErrRepoTransferInProgress checks if an error is a ErrRepoTransferInProgress.
+func IsErrRepoTransferInProgress(err error) bool {
+	_, ok := err.(ErrRepoTransferInProgress)
+	return ok
+}
+
+func (err ErrRepoTransferInProgress) Error() string {
+	return fmt.Sprintf("repository is already being transferred [uname: %s, name: %s]", err.Uname, err.Name)
+}
+
 // ErrRepoAlreadyExist represents a "RepoAlreadyExist" kind of error.
 type ErrRepoAlreadyExist struct {
 	Uname string
@@ -1001,6 +1065,29 @@ func (e *ErrWontSign) Error() string {
 // IsErrWontSign checks if an error is a ErrWontSign
 func IsErrWontSign(err error) bool {
 	_, ok := err.(*ErrWontSign)
+	return ok
+}
+
+// ErrMigrationNotAllowed explains why a migration from an url is not allowed
+type ErrMigrationNotAllowed struct {
+	Host          string
+	NotResolvedIP bool
+	PrivateNet    string
+}
+
+func (e *ErrMigrationNotAllowed) Error() string {
+	if e.NotResolvedIP {
+		return fmt.Sprintf("migrate from '%s' is not allowed: unknown hostname", e.Host)
+	}
+	if len(e.PrivateNet) != 0 {
+		return fmt.Sprintf("migrate from '%s' is not allowed: the host resolve to a private ip address '%s'", e.Host, e.PrivateNet)
+	}
+	return fmt.Sprintf("migrate from '%s is not allowed'", e.Host)
+}
+
+// IsErrMigrationNotAllowed checks if an error is a ErrMigrationNotAllowed
+func IsErrMigrationNotAllowed(err error) bool {
+	_, ok := err.(*ErrMigrationNotAllowed)
 	return ok
 }
 
@@ -2003,7 +2090,7 @@ type ErrNotValidReviewRequest struct {
 
 // IsErrNotValidReviewRequest checks if an error is a ErrNotValidReviewRequest.
 func IsErrNotValidReviewRequest(err error) bool {
-	_, ok := err.(ErrReviewNotExist)
+	_, ok := err.(ErrNotValidReviewRequest)
 	return ok
 }
 

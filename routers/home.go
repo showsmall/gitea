@@ -17,6 +17,7 @@ import (
 	"code.gitea.io/gitea/modules/setting"
 	"code.gitea.io/gitea/modules/structs"
 	"code.gitea.io/gitea/modules/util"
+	"code.gitea.io/gitea/modules/web/middleware"
 	"code.gitea.io/gitea/routers/user"
 )
 
@@ -46,7 +47,7 @@ func Home(ctx *context.Context) {
 		} else if ctx.User.MustChangePassword {
 			ctx.Data["Title"] = ctx.Tr("auth.must_change_password")
 			ctx.Data["ChangePasscodeLink"] = setting.AppSubURL + "/user/change_password"
-			ctx.SetCookie("redirect_to", setting.AppSubURL+ctx.Req.URL.RequestURI(), 0, setting.AppSubURL)
+			middleware.SetRedirectToCookie(ctx.Resp, setting.AppSubURL+ctx.Req.URL.RequestURI())
 			ctx.Redirect(setting.AppSubURL + "/user/settings/change_password")
 		} else {
 			user.Dashboard(ctx)
@@ -299,6 +300,9 @@ func ExploreCode(ctx *context.Context) {
 		page = 1
 	}
 
+	queryType := strings.TrimSpace(ctx.Query("t"))
+	isMatch := queryType == "match"
+
 	var (
 		repoIDs []int64
 		err     error
@@ -342,14 +346,14 @@ func ExploreCode(ctx *context.Context) {
 
 		ctx.Data["RepoMaps"] = rightRepoMap
 
-		total, searchResults, searchResultLanguages, err = code_indexer.PerformSearch(repoIDs, language, keyword, page, setting.UI.RepoSearchPagingNum)
+		total, searchResults, searchResultLanguages, err = code_indexer.PerformSearch(repoIDs, language, keyword, page, setting.UI.RepoSearchPagingNum, isMatch)
 		if err != nil {
 			ctx.ServerError("SearchResults", err)
 			return
 		}
 		// if non-login user or isAdmin, no need to check UnitTypeCode
 	} else if (ctx.User == nil && len(repoIDs) > 0) || isAdmin {
-		total, searchResults, searchResultLanguages, err = code_indexer.PerformSearch(repoIDs, language, keyword, page, setting.UI.RepoSearchPagingNum)
+		total, searchResults, searchResultLanguages, err = code_indexer.PerformSearch(repoIDs, language, keyword, page, setting.UI.RepoSearchPagingNum, isMatch)
 		if err != nil {
 			ctx.ServerError("SearchResults", err)
 			return
@@ -380,6 +384,7 @@ func ExploreCode(ctx *context.Context) {
 
 	ctx.Data["Keyword"] = keyword
 	ctx.Data["Language"] = language
+	ctx.Data["queryType"] = queryType
 	ctx.Data["SearchResults"] = searchResults
 	ctx.Data["SearchResultLanguages"] = searchResultLanguages
 	ctx.Data["RequireHighlightJS"] = true

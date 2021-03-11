@@ -6,11 +6,10 @@ package models
 
 import (
 	"fmt"
-	"path"
+	"strconv"
 
 	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/setting"
-	api "code.gitea.io/gitea/modules/structs"
 	"code.gitea.io/gitea/modules/timeutil"
 
 	"xorm.io/builder"
@@ -40,6 +39,8 @@ const (
 	NotificationSourcePullRequest
 	// NotificationSourceCommit is a notification of a commit
 	NotificationSourceCommit
+	// NotificationSourceRepository is a notification for a repository
+	NotificationSourceRepository
 )
 
 // Notification represents a notification
@@ -118,6 +119,46 @@ func getNotifications(e Engine, options FindNotificationOptions) (nl Notificatio
 // GetNotifications returns all notifications that fit to the given options.
 func GetNotifications(opts FindNotificationOptions) (NotificationList, error) {
 	return getNotifications(x, opts)
+}
+
+// CreateRepoTransferNotification creates  notification for the user a repository was transferred to
+func CreateRepoTransferNotification(doer, newOwner *User, repo *Repository) error {
+	sess := x.NewSession()
+	defer sess.Close()
+	if err := sess.Begin(); err != nil {
+		return err
+	}
+	var notify []*Notification
+
+	if newOwner.IsOrganization() {
+		users, err := getUsersWhoCanCreateOrgRepo(sess, newOwner.ID)
+		if err != nil || len(users) == 0 {
+			return err
+		}
+		for i := range users {
+			notify = append(notify, &Notification{
+				UserID:    users[i].ID,
+				RepoID:    repo.ID,
+				Status:    NotificationStatusUnread,
+				UpdatedBy: doer.ID,
+				Source:    NotificationSourceRepository,
+			})
+		}
+	} else {
+		notify = []*Notification{{
+			UserID:    newOwner.ID,
+			RepoID:    repo.ID,
+			Status:    NotificationStatusUnread,
+			UpdatedBy: doer.ID,
+			Source:    NotificationSourceRepository,
+		}}
+	}
+
+	if _, err := sess.InsertMulti(notify); err != nil {
+		return err
+	}
+
+	return sess.Commit()
 }
 
 // CreateOrUpdateIssueNotifications creates an issue notification
@@ -332,56 +373,6 @@ func countUnread(e Engine, userID int64) int64 {
 	return exist
 }
 
-// APIFormat converts a Notification to api.NotificationThread
-func (n *Notification) APIFormat() *api.NotificationThread {
-	result := &api.NotificationThread{
-		ID:        n.ID,
-		Unread:    !(n.Status == NotificationStatusRead || n.Status == NotificationStatusPinned),
-		Pinned:    n.Status == NotificationStatusPinned,
-		UpdatedAt: n.UpdatedUnix.AsTime(),
-		URL:       n.APIURL(),
-	}
-
-	//since user only get notifications when he has access to use minimal access mode
-	if n.Repository != nil {
-		result.Repository = n.Repository.APIFormat(AccessModeRead)
-	}
-
-	//handle Subject
-	switch n.Source {
-	case NotificationSourceIssue:
-		result.Subject = &api.NotificationSubject{Type: "Issue"}
-		if n.Issue != nil {
-			result.Subject.Title = n.Issue.Title
-			result.Subject.URL = n.Issue.APIURL()
-			result.Subject.State = n.Issue.State()
-			comment, err := n.Issue.GetLastComment()
-			if err == nil && comment != nil {
-				result.Subject.LatestCommentURL = comment.APIURL()
-			}
-		}
-	case NotificationSourcePullRequest:
-		result.Subject = &api.NotificationSubject{Type: "Pull"}
-		if n.Issue != nil {
-			result.Subject.Title = n.Issue.Title
-			result.Subject.URL = n.Issue.APIURL()
-			result.Subject.State = n.Issue.State()
-			comment, err := n.Issue.GetLastComment()
-			if err == nil && comment != nil {
-				result.Subject.LatestCommentURL = comment.APIURL()
-			}
-		}
-	case NotificationSourceCommit:
-		result.Subject = &api.NotificationSubject{
-			Type:  "Commit",
-			Title: n.CommitID,
-		}
-		//unused until now
-	}
-
-	return result
-}
-
 // LoadAttributes load Repo Issue User and Comment if not loaded
 func (n *Notification) LoadAttributes() (err error) {
 	return n.loadAttributes(x)
@@ -414,7 +405,7 @@ func (n *Notification) loadRepo(e Engine) (err error) {
 }
 
 func (n *Notification) loadIssue(e Engine) (err error) {
-	if n.Issue == nil {
+	if n.Issue == nil && n.IssueID != 0 {
 		n.Issue, err = getIssueByID(e, n.IssueID)
 		if err != nil {
 			return fmt.Errorf("getIssueByID [%d]: %v", n.IssueID, err)
@@ -425,7 +416,7 @@ func (n *Notification) loadIssue(e Engine) (err error) {
 }
 
 func (n *Notification) loadComment(e Engine) (err error) {
-	if n.Comment == nil && n.CommentID > 0 {
+	if n.Comment == nil && n.CommentID != 0 {
 		n.Comment, err = getCommentByID(e, n.CommentID)
 		if err != nil {
 			return fmt.Errorf("GetCommentByID [%d] for issue ID [%d]: %v", n.CommentID, n.IssueID, err)
@@ -456,28 +447,27 @@ func (n *Notification) GetIssue() (*Issue, error) {
 
 // HTMLURL formats a URL-string to the notification
 func (n *Notification) HTMLURL() string {
-	if n.Comment != nil {
-		return n.Comment.HTMLURL()
+	switch n.Source {
+	case NotificationSourceIssue, NotificationSourcePullRequest:
+		if n.Comment != nil {
+			return n.Comment.HTMLURL()
+		}
+		return n.Issue.HTMLURL()
+	case NotificationSourceCommit:
+		return n.Repository.HTMLURL() + "/commit/" + n.CommitID
+	case NotificationSourceRepository:
+		return n.Repository.HTMLURL()
 	}
-	return n.Issue.HTMLURL()
+	return ""
 }
 
 // APIURL formats a URL-string to the notification
 func (n *Notification) APIURL() string {
-	return setting.AppURL + path.Join("api/v1/notifications/threads", fmt.Sprintf("%d", n.ID))
+	return setting.AppURL + "api/v1/notifications/threads/" + strconv.FormatInt(n.ID, 10)
 }
 
 // NotificationList contains a list of notifications
 type NotificationList []*Notification
-
-// APIFormat converts a NotificationList to api.NotificationThread list
-func (nl NotificationList) APIFormat() []*api.NotificationThread {
-	var result = make([]*api.NotificationThread, 0, len(nl))
-	for _, n := range nl {
-		result = append(result, n.APIFormat())
-	}
-	return result
-}
 
 // LoadAttributes load Repo Issue User and Comment if not loaded
 func (nl NotificationList) LoadAttributes() (err error) {
@@ -622,8 +612,10 @@ func (nl NotificationList) LoadIssues() ([]int, error) {
 		if notification.Issue == nil {
 			notification.Issue = issues[notification.IssueID]
 			if notification.Issue == nil {
-				log.Error("Notification[%d]: IssueID: %d Not Found", notification.ID, notification.IssueID)
-				failures = append(failures, i)
+				if notification.IssueID != 0 {
+					log.Error("Notification[%d]: IssueID: %d Not Found", notification.ID, notification.IssueID)
+					failures = append(failures, i)
+				}
 				continue
 			}
 			notification.Issue.Repo = notification.Repository
@@ -743,7 +735,7 @@ func GetUIDsAndNotificationCounts(since, until timeutil.TimeStamp) ([]UserIDCoun
 	return res, x.SQL(sql, since, until, NotificationStatusUnread).Find(&res)
 }
 
-func setNotificationStatusReadIfUnread(e Engine, userID, issueID int64) error {
+func setIssueNotificationStatusReadIfUnread(e Engine, userID, issueID int64) error {
 	notification, err := getIssueNotification(e, userID, issueID)
 	// ignore if not exists
 	if err != nil {
@@ -757,6 +749,16 @@ func setNotificationStatusReadIfUnread(e Engine, userID, issueID int64) error {
 	notification.Status = NotificationStatusRead
 
 	_, err = e.ID(notification.ID).Update(notification)
+	return err
+}
+
+func setRepoNotificationStatusReadIfUnread(e Engine, userID, repoID int64) error {
+	_, err := e.Where(builder.Eq{
+		"user_id": userID,
+		"status":  NotificationStatusUnread,
+		"source":  NotificationSourceRepository,
+		"repo_id": repoID,
+	}).Cols("status").Update(&Notification{Status: NotificationStatusRead})
 	return err
 }
 
